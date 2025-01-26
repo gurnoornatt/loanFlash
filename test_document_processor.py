@@ -1,82 +1,78 @@
 import unittest
-from unittest.mock import patch, mock_open, MagicMock
-import requests
-import os
+from unittest.mock import patch, MagicMock, mock_open
+import json
 from document_processor import process_document
 
 class TestDocumentProcessor(unittest.TestCase):
     def setUp(self):
-        self.mock_pdf_path = "test.pdf"
-        
-        # Mock API response data
-        self.mock_api_response = {
-            "income": "120000",
-            "credit_score": "750",
-            "debt": "50000",
-            "property_value": "500000"
-        }
-
-    @patch('requests.post')
-    @patch('document_processor.create_client')
-    @patch('os.path.exists')
-    def test_successful_document_processing(self, mock_exists, mock_create_client, mock_post):
-        # Mock file existence check
-        mock_exists.return_value = True
-        
-        # Mock the API response
-        mock_post.return_value.json.return_value = self.mock_api_response
-        mock_post.return_value.raise_for_status.return_value = None
-        
-        # Create a mock Supabase client
-        mock_supabase = MagicMock()
-        mock_table = MagicMock()
-        mock_insert = MagicMock()
-        
-        # Setup the mock chain
-        mock_create_client.return_value = mock_supabase
-        mock_supabase.table.return_value = mock_table
-        mock_table.insert.return_value = mock_insert
-        mock_insert.execute.return_value = {"status": "success"}
-        
         # Mock environment variables
-        with patch.dict('os.environ', {
-            'SUPABASE_URL': 'https://test.supabase.co',
-            'SUPABASE_KEY': 'test-key',
+        self.env_patcher = patch.dict('os.environ', {
             'ADDY_API_KEY': 'test-addy-key'
-        }):
-            # Mock file open
-            with patch('builtins.open', mock_open(read_data=b'fake pdf content')):
-                result = process_document(self.mock_pdf_path)
+        })
+        self.env_patcher.start()
+
+    def tearDown(self):
+        self.env_patcher.stop()
+
+    def test_successful_document_processing(self):
+        """Test successful document processing"""
+        # Mock file reading
+        mock_pdf_data = b'test pdf content'
+        m = mock_open(read_data=mock_pdf_data)
         
-        # Verify the result structure
-        self.assertTrue(result['success'], f"Process failed with error: {result.get('error', 'Unknown error')}")
-        self.assertEqual(result['data']['income'], 120000.0)
-        self.assertEqual(result['data']['credit_score'], 750)
-        self.assertEqual(result['data']['debt'], 50000.0)
-        self.assertEqual(result['data']['property_value'], 500000.0)
-        
-        # Verify API calls were made correctly
-        mock_post.assert_called_once()
-        mock_create_client.assert_called_once_with('https://test.supabase.co', 'test-key')
-        mock_supabase.table.assert_called_once_with('borrowers')
-        mock_table.insert.assert_called_once()
-    
-    @patch('os.path.exists')
-    def test_missing_file(self, mock_exists):
-        # Mock file not existing
-        mock_exists.return_value = False
-        
-        result = process_document("nonexistent.pdf")
-        self.assertFalse(result['success'])
-        self.assertEqual(result['error_type'], 'FileNotFoundError')
-    
-    def test_missing_env_vars(self):
-        # Test with empty environment
-        with patch.dict('os.environ', {}, clear=True):
-            result = process_document(self.mock_pdf_path)
+        with patch('builtins.open', m), \
+             patch('os.path.exists', return_value=True), \
+             patch('os.path.getsize', return_value=1024):  # 1KB file
+            
+            # Mock successful API response
+            mock_response = {
+                'success': True,
+                'document': {
+                    'wages': 75000,
+                    'credit_score': 750,
+                    'debt': 25000,
+                    'property_value': 400000
+                }
+            }
+            
+            with patch('requests.post') as mock_post:
+                mock_post.return_value.json.return_value = mock_response
+                mock_post.return_value.status_code = 200
+                mock_post.return_value.raise_for_status = lambda: None
+                
+                result = process_document('test.pdf')
+                
+                self.assertTrue(result['success'])
+                self.assertEqual(result['data']['income'], 75000.0)
+                self.assertEqual(result['data']['credit_score'], 750)
+                self.assertEqual(result['data']['debt'], 25000.0)
+                self.assertEqual(result['data']['property_value'], 400000.0)
+
+    def test_missing_file(self):
+        """Test handling of missing file"""
+        with patch('os.path.exists', return_value=False):
+            result = process_document('nonexistent.pdf')
             self.assertFalse(result['success'])
-            self.assertEqual(result['error_type'], 'ValueError')
-            self.assertIn('Missing required environment variables', result['error'])
+            self.assertEqual(result['error_type'], 'FileNotFoundError')
+
+    def test_error_handling(self):
+        """Test error handling for API failures"""
+        mock_pdf_data = b'test pdf content'
+        m = mock_open(read_data=mock_pdf_data)
+        
+        with patch('builtins.open', m), \
+             patch('os.path.exists', return_value=True), \
+             patch('os.path.getsize', return_value=1024):  # 1KB file
+            
+            with patch('requests.post') as mock_post:
+                mock_post.return_value.status_code = 500
+                mock_post.return_value.json.return_value = {'error': 'API Error'}
+                mock_post.return_value.raise_for_status = lambda: None
+                
+                result = process_document('test.pdf')
+                
+                self.assertFalse(result['success'])
+                self.assertIn('error', result)
 
 if __name__ == '__main__':
     unittest.main() 

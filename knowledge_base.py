@@ -30,15 +30,12 @@ class KnowledgeBaseManager:
         
         # Define source URLs
         self.sources = {
-            'w2': 'https://www.irs.gov/pub/irs-pdf/fw2.pdf',
-            'form_1099': 'https://www.irs.gov/pub/irs-pdf/f1099msc.pdf',
-            'tax_return': 'https://www.irs.gov/pub/irs-pdf/f1040.pdf',
-            'business_tax': 'https://www.irs.gov/pub/irs-pdf/f1120.pdf',
-            'k1_schedule': 'https://www.irs.gov/pub/irs-pdf/f1120ssk.pdf',
-            'social_security': 'https://www.ssa.gov/pubs/EN-05-10056.pdf',
-            'va_benefits': 'https://www.benefits.va.gov/homeloans/documents/docs/veteran_registration_coe.pdf',
-            'hoa_statement': 'https://www.camsmgt.com/files/SAMPLE%20INCOME%20AND%20EXPENSES.pdf',
-            'insurance_declaration': 'https://www.mcnicholaslaw.com/wp-content/uploads/2020/10/Sample_home_Dec_page.pdf'
+            'fha': 'https://www.hud.gov/sites/documents/4155-1_2.PDF',
+            'fannie_mae': 'https://singlefamily.fanniemae.com/media/document/pdf/selling-guide',
+            'freddie_mac': 'https://guide.freddiemac.com/app/guide/',
+            'va': 'https://www.benefits.va.gov/WARMS/docs/admin26/handbook/ChapterLendersHanbookChapter3.pdf',
+            'usda': 'https://www.rd.usda.gov/files/3555-1chapter11.pdf',
+            'california': 'https://www.calhfa.ca.gov/homeownership/programs/handbook.pdf'
         }
         
         # Define document types and their patterns
@@ -77,22 +74,36 @@ class KnowledgeBaseManager:
     
     def _clean_text(self, text: str) -> str:
         """Clean and normalize text content"""
-        # Remove extra whitespace
+        # First, normalize whitespace
         text = re.sub(r'\s+', ' ', text)
-        # Remove special characters
-        text = re.sub(r'[^\w\s\-.,;:()?]', '', text)
+        
+        # Remove commas from numbers
+        text = re.sub(r'(\d),(\d)', r'\1\2', text)
+        
+        # Handle special cases
+        text = re.sub(r'[!@#^&*()_+=:]', '', text)  # Remove most special characters including colon
+        text = re.sub(r'\$(?!\d)', '', text)  # Remove $ not followed by a number
+        text = re.sub(r'(?<!\d)%', '', text)  # Remove % not preceded by a number
+        
+        # Clean up any resulting double spaces and trailing punctuation
+        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r'[.,;:]+$', '', text)  # Remove trailing punctuation
+        
         return text.strip()
     
     def fetch_guidelines(self, source: str) -> List[Dict[str, Any]]:
         """Fetch guidelines from a specific source"""
         try:
+            if source not in self.sources:
+                raise ValueError(f"Invalid source: {source}")
+
             response = requests.get(self.sources[source])
             response.raise_for_status()
             
             # Parse HTML content
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Extract relevant sections (this would need to be customized per source)
+            # Extract relevant sections
             guidelines = []
             sections = soup.find_all(['h2', 'h3', 'p'])
             
@@ -102,19 +113,34 @@ class KnowledgeBaseManager:
             for section in sections:
                 if section.name in ['h2', 'h3']:
                     if current_section:
+                        # Process previous section
+                        text_content = ' '.join(current_text)
                         guidelines.append({
                             'rule_name': current_section,
-                            'rule_text': ' '.join(current_text),
+                            'rule_text': text_content,
                             'source': source,
-                            'category': self._detect_category(current_section, ' '.join(current_text)),
-                            'state': self._detect_state(' '.join(current_text)),
-                            'version_hash': self._generate_content_hash(' '.join(current_text)),
+                            'category': self._detect_category(current_section, text_content),
+                            'state': self._detect_state(text_content),
+                            'version_hash': self._generate_content_hash(text_content),
                             'last_updated': datetime.now().isoformat()
                         })
                     current_section = section.text.strip()
                     current_text = []
                 else:
                     current_text.append(self._clean_text(section.text))
+            
+            # Process the last section if exists
+            if current_section and current_text:
+                text_content = ' '.join(current_text)
+                guidelines.append({
+                    'rule_name': current_section,
+                    'rule_text': text_content,
+                    'source': source,
+                    'category': self._detect_category(current_section, text_content),
+                    'state': self._detect_state(text_content),
+                    'version_hash': self._generate_content_hash(text_content),
+                    'last_updated': datetime.now().isoformat()
+                })
             
             return guidelines
             
@@ -149,8 +175,17 @@ class KnowledgeBaseManager:
     
     def _detect_state(self, content: str) -> Optional[str]:
         """Detect if the guideline is state-specific"""
-        # Load state names (could be moved to a config file)
-        states = ['Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', ...]  # Add all states
+        # Complete list of US states
+        states = [
+            'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut',
+            'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa',
+            'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 'Michigan',
+            'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada', 'New Hampshire',
+            'New Jersey', 'New Mexico', 'New York', 'North Carolina', 'North Dakota', 'Ohio',
+            'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota',
+            'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington', 'West Virginia',
+            'Wisconsin', 'Wyoming'
+        ]
         
         for state in states:
             pattern = f"(?i)\\b{state}\\b"

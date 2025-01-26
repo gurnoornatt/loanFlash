@@ -39,9 +39,24 @@ class TestKnowledgeBaseManager(unittest.TestCase):
     
     def test_clean_text(self):
         """Test text cleaning functionality"""
-        dirty_text = "This is a  test\nwith multiple   spaces and\tspecial chars!@#$"
-        clean_text = self.kb._clean_text(dirty_text)
-        self.assertEqual(clean_text, "This is a test with multiple spaces and special chars")
+        test_cases = [
+            (
+                "This is a  test\nwith multiple   spaces and\tspecial chars!@#$%",
+                "This is a test with multiple spaces and special chars"
+            ),
+            (
+                "LTV is 95% with $100,000 down-payment",
+                "LTV is 95% with $100000 down-payment"
+            ),
+            (
+                "Special chars: !@#$%^&*()_+",
+                "Special chars"
+            )
+        ]
+        
+        for dirty_text, expected_clean in test_cases:
+            clean_text = self.kb._clean_text(dirty_text)
+            self.assertEqual(clean_text, expected_clean, f"Failed to clean text: {dirty_text}")
     
     def test_detect_category(self):
         """Test category detection"""
@@ -82,6 +97,7 @@ class TestKnowledgeBaseManager(unittest.TestCase):
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
         
+        # Use a valid source from the sources dictionary
         guidelines = self.kb.fetch_guidelines('fha')
         self.assertTrue(isinstance(guidelines, list))
         self.assertTrue(len(guidelines) > 0)

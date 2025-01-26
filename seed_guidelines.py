@@ -57,15 +57,20 @@ guidelines = [
 
 def seed_guidelines():
     try:
-        # Clear existing data
-        supabase.table('guidelines').delete().execute()
+        print("\nClearing existing guidelines...")
+        # Delete all records where id exists
+        delete_result = supabase.table('guidelines').delete().filter('id', 'not.is', 'null').execute()
+        print(f"Delete result: {delete_result}")
         
-        # Insert new guidelines
+        print("\nInserting new guidelines...")
         result = supabase.table('guidelines').insert(guidelines).execute()
-        print(f"Successfully added {len(guidelines)} guidelines to the database.")
+        print(f"Insert result: {result}")
+        
+        print(f"\nSuccessfully added {len(guidelines)} guidelines to the database.")
         return True
     except Exception as e:
-        print(f"Error seeding guidelines: {str(e)}")
+        print(f"\nError seeding guidelines: {str(e)}")
+        print(f"Error type: {type(e)}")
         return False
 
 if __name__ == '__main__':

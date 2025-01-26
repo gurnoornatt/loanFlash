@@ -37,6 +37,19 @@ def test_with_sample_queries():
                 print(f"Intent: {result['intent']}")
                 print(f"Entities: {json.dumps(result['entities'], indent=2)}")
                 print(f"Answer: {result['answer']}")
+                
+                # Add source attribution
+                if result.get('guidelines_used'):
+                    print("\n📚 Guidelines Referenced:")
+                    print("=====================")
+                    for guideline in result['guidelines_used']:
+                        print(f"• {guideline['rule_name']} ({guideline['source']})")
+                        print(f"  Category: {guideline['category']}")
+                        if guideline['state']:
+                            print(f"  State: {guideline['state']}")
+                        print(f"  Text: {guideline['rule_text'][:100]}...")
+                        print()
+                
                 print(f"Confidence: {result['metadata'].get('confidence_score', 'N/A')}")
             else:
                 print(f"❌ Error: {result['error']}")
@@ -77,6 +90,19 @@ def test_with_custom_query():
                 print(f"🎯 Intent: {result['intent']}")
                 print(f"🔍 Entities: {json.dumps(result['entities'], indent=2)}")
                 print(f"\n💡 Answer: {result['answer']}")
+                
+                # Add source attribution
+                if result.get('guidelines_used'):
+                    print("\n📚 Guidelines Referenced:")
+                    print("=====================")
+                    for guideline in result['guidelines_used']:
+                        print(f"• {guideline['rule_name']} ({guideline['source']})")
+                        print(f"  Category: {guideline['category']}")
+                        if guideline['state']:
+                            print(f"  State: {guideline['state']}")
+                        print(f"  Text: {guideline['rule_text'][:100]}...")
+                        print()
+                
                 print(f"\n📈 Confidence: {result['metadata'].get('confidence_score', 'N/A')}")
             else:
                 print(f"❌ Error: {result['error']}")

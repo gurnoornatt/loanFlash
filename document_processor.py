@@ -195,107 +195,101 @@ def merge_results(results: List[Dict]) -> Dict:
 
 def process_document(pdf_file_path: str) -> Dict[str, Any]:
     """
-    Process a large PDF document through Addy AI's Document Extraction API and store results in Supabase.
-    Handles large documents by splitting them into chunks and processing in parallel.
+    Process a PDF document through Addy AI's Document Extraction API.
     
     Args:
         pdf_file_path: Path to the PDF file
     
     Returns:
-        Dict containing the extracted and stored data or error information
+        Dict containing the extracted data or error information
     """
-    temp_files = []
     try:
         # Get environment variables
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
         addy_api_key = os.getenv('ADDY_API_KEY')
         
         # Validate environment variables
-        if not all([supabase_url, supabase_key, addy_api_key]):
-            missing_vars = [var for var, val in {
-                'SUPABASE_URL': supabase_url,
-                'SUPABASE_KEY': supabase_key,
-                'ADDY_API_KEY': addy_api_key
-            }.items() if not val]
-            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+        if not addy_api_key:
+            raise ValueError("Missing required environment variable: ADDY_API_KEY")
         
         # Verify PDF file exists
         if not os.path.exists(pdf_file_path):
             raise FileNotFoundError(f"PDF file not found: {pdf_file_path}")
         
-        # Get file size
-        file_size = os.path.getsize(pdf_file_path) / (1024 * 1024)  # Size in MB
-        logger.info(f"Processing PDF file of size: {file_size:.2f} MB")
+        # Read the PDF file
+        with open(pdf_file_path, 'rb') as file:
+            file_content = file.read()
+            file_data = base64.b64encode(file_content).decode('utf-8')
         
-        # Split PDF into chunks if it's large
-        if file_size > 10:  # If file is larger than 10MB
-            logger.info("Large PDF detected, splitting into chunks...")
-            temp_files = split_pdf(pdf_file_path)
-            logger.info(f"Split into {len(temp_files)} chunks")
-        else:
-            temp_files = [pdf_file_path]
-        
-        # Process chunks in parallel
-        chunk_results = []
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = [
-                executor.submit(process_chunk, chunk_path, addy_api_key)
-                for chunk_path in temp_files
-            ]
-            
-            # Show progress bar
-            with tqdm(total=len(futures), desc="Processing chunks") as pbar:
-                for future in as_completed(futures):
-                    chunk_results.append(future.result())
-                    pbar.update(1)
-        
-        # Merge results from all chunks
-        extracted_data = merge_results(chunk_results)
-        logger.info("Successfully merged results from all chunks")
-        
-        # Initialize Supabase client
-        try:
-            logger.info("Connecting to Supabase")
-            supabase = create_client(supabase_url, supabase_key)
-        except Exception as e:
-            raise ConnectionError(f"Failed to connect to Supabase: {str(e)}")
-        
-        # Prepare data for insertion
-        insert_data = {
-            'id': str(uuid.uuid4()),
-            **extracted_data
+        # Prepare request headers
+        headers = {
+            'api-key': addy_api_key,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
         }
         
-        # Insert data into Supabase
-        try:
-            logger.info("Inserting data into Supabase")
-            result = supabase.table('borrowers').insert(insert_data).execute()
-            logger.info("Successfully inserted data")
-        except Exception as e:
-            raise ConnectionError(f"Failed to insert data into Supabase: {str(e)}")
+        # Prepare request payload
+        payload = {
+            "fileData": file_data,
+            "contentType": "application/pdf",
+            "documentType": "w2",  # Default to W2
+            "modelDetail": "high"
+        }
+        
+        # Make API request
+        response = requests.post(
+            'https://addy-ai-external-api-dev.firebaseapp.com/document/extract',
+            headers=headers,
+            json=payload,
+            timeout=300
+        )
+        
+        # Check response
+        response.raise_for_status()
+        result = response.json()
+        
+        # Check if extraction was successful
+        if not result.get('success'):
+            raise ValueError(f"API returned error: {result.get('errorMessage', 'Unknown error')}")
+        
+        # Extract and format the data
+        document_data = result.get('document', {})
+        extracted_data = {
+            'income': float(document_data.get('wages', 0)),
+            'credit_score': int(document_data.get('credit_score', 0)),
+            'debt': float(document_data.get('debt', 0)),
+            'property_value': float(document_data.get('property_value', 0))
+        }
         
         return {
             'success': True,
-            'data': insert_data,
-            'supabase_result': result,
-            'processed_chunks': len(temp_files)
+            'data': extracted_data
         }
-            
+        
+    except FileNotFoundError as e:
+        logger.error(f"Error processing document: {str(e)}")
+        return {
+            'success': False,
+            'error': str(e),
+            'error_type': 'FileNotFoundError'
+        }
+    except ValueError as e:
+        logger.error(f"Error processing document: {str(e)}")
+        return {
+            'success': False,
+            'error': str(e),
+            'error_type': 'ValueError'
+        }
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error processing document: {str(e)}")
+        return {
+            'success': False,
+            'error': str(e),
+            'error_type': 'RequestException'
+        }
     except Exception as e:
         logger.error(f"Error processing document: {str(e)}")
         return {
             'success': False,
             'error': str(e),
             'error_type': type(e).__name__
-        }
-    
-    finally:
-        # Clean up temporary files
-        if temp_files and temp_files[0] != pdf_file_path:  # Only clean up if we created temp files
-            for temp_file in temp_files:
-                try:
-                    os.remove(temp_file)
-                    logger.debug(f"Cleaned up temporary file: {temp_file}")
-                except:
-                    pass 
+        } 
